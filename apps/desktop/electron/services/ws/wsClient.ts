@@ -28,7 +28,6 @@ export function createWsClient(peerManager: PeerManager) {
 
     const ws = new WebSocket(url);
 
-    // We only know peer userId after HELLO_ACK
     let remote: PeerIdentity | null = null;
 
     ws.on("open", () => {
@@ -47,41 +46,31 @@ export function createWsClient(peerManager: PeerManager) {
         const msg = JSON.parse(data.toString()) as WsEnvelope<any>;
 
         if (msg.type === "HELLO_ACK") {
-          // msg.from is the peer identity
           remote = msg.from as PeerIdentity;
 
-          // ✅ Map outgoing socket to that peer userId
+          // map outgoing socket
           peerManager.setSocket(remote.userId, ws as any);
 
           peerManager.upsertPeer(remote, { status: "online", lastSeen: Date.now() });
           console.log("[WS-CLIENT] HELLO_ACK from", remote.name, remote.ip);
 
-          // ✅ send my known peers to them (gossip)
-         const me = profileToIdentity(profile);
-          const myKnown = peerManager.getAllPeerIdentities();
+          // ✅ Send my known peers INCLUDING myself
+          const me = profileToIdentity(profile);
+          const known = peerManager.getAllPeerIdentities();
 
-          // ✅ include myself so the other side learns "who connected"
           const peersMsg: WsEnvelope<PeersPayload> = {
             type: "PEERS",
             msgId: randomUUID(),
             ts: Date.now(),
             from: me,
-            payload: { peers: [me, ...myKnown] },
+            payload: { peers: [me, ...known] },
           };
 
           ws.send(JSON.stringify(peersMsg));
-
-          ws.send(JSON.stringify(peersMsg));
-          return;
-        }
-
-        if (msg.type === "PONG") {
-          peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
           return;
         }
 
         if (msg.type === "PING") {
-          // reply PONG
           const prof = getProfile();
           if (!prof) return;
 
@@ -97,8 +86,12 @@ export function createWsClient(peerManager: PeerManager) {
           return;
         }
 
+        if (msg.type === "PONG") {
+          peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
+          return;
+        }
+
         if (msg.type === "PEERS") {
-          // Optional: if a peer sends you peer list directly on outgoing channel
           const prof = getProfile();
           if (!prof) return;
 

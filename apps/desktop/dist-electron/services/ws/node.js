@@ -22,6 +22,7 @@ function startWsNode({ port, peerManager, wsClient }) {
                         socket.close();
                         return;
                     }
+                    const me = (0, protocol_1.profileToIdentity)(profile);
                     // Save the peer & socket mapping
                     peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
                     peerManager.setSocket(msg.from.userId, socket);
@@ -30,18 +31,18 @@ function startWsNode({ port, peerManager, wsClient }) {
                         type: "HELLO_ACK",
                         msgId: (0, crypto_1.randomUUID)(),
                         ts: Date.now(),
-                        from: (0, protocol_1.profileToIdentity)(profile),
+                        from: me,
                         payload: { accepted: true },
                     };
                     socket.send(JSON.stringify(reply));
-                    // ✅ Immediately send my known peers (so new peer learns B etc.)
+                    // ✅ Immediately send my known peers so the new peer learns everyone
                     const myPeers = peerManager.getAllPeerIdentities();
                     const peersMsg = {
                         type: "PEERS",
                         msgId: (0, crypto_1.randomUUID)(),
                         ts: Date.now(),
-                        from: (0, protocol_1.profileToIdentity)(profile),
-                        payload: { peers: [(0, protocol_1.profileToIdentity)(profile), ...myPeers] },
+                        from: me,
+                        payload: { peers: [me, ...myPeers] },
                     };
                     socket.send(JSON.stringify(peersMsg));
                     return;
@@ -60,7 +61,6 @@ function startWsNode({ port, peerManager, wsClient }) {
                     return;
                 }
                 if (msg.type === "PONG") {
-                    // Incoming PONG means msg.from is alive
                     peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
                     return;
                 }
@@ -70,21 +70,17 @@ function startWsNode({ port, peerManager, wsClient }) {
                         return;
                     const me = (0, protocol_1.profileToIdentity)(profile);
                     const list = (msg.payload?.peers ?? []);
-                    // Merge peers and auto-connect
                     for (const p of list) {
                         if (!p?.userId || !p?.ip || !p?.name)
                             continue;
                         if (p.userId === me.userId)
                             continue;
-                        // Do not force offline; just upsert identity + discoveredVia
                         peerManager.upsertPeer(p, {
                             lastSeen: Date.now(),
                             discoveredVia: msg.from,
                         });
-                        // auto-connect (deduped inside wsClient)
                         wsClient.connectToPeer(p.ip).catch(() => { });
                     }
-                    // Ack
                     const ack = {
                         type: "PEERS_ACK",
                         msgId: (0, crypto_1.randomUUID)(),
@@ -93,7 +89,7 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { received: list.length },
                     };
                     socket.send(JSON.stringify(ack));
-                    // ✅ Forward these peers to everyone else except the sender
+                    // Forward peers to everyone else except sender
                     peerManager.broadcastPeers(list, me, msg.from.userId);
                     return;
                 }

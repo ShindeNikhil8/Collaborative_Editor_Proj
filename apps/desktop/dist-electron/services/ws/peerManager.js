@@ -12,7 +12,6 @@ class PeerManager {
     }
     upsertPeer(peer, patch) {
         const existing = this.peersByUserId.get(peer.userId);
-        // Important: do not overwrite status unless patch provides it
         const next = {
             ...peer,
             status: existing?.status ?? "offline",
@@ -78,11 +77,11 @@ class PeerManager {
             return;
         win.webContents.send("peers:update", this.getPeersSnapshot());
     }
-    // Broadcast a PEERS message to all connected sockets
+    // Broadcast PEERS to all sockets (except one)
     broadcastPeers(peers, envelopeFrom, exceptUserId) {
         const msg = {
             type: "PEERS",
-            msgId: (0, crypto_1.randomUUID)(),
+            msgId: this.newMsgId(),
             ts: Date.now(),
             from: envelopeFrom,
             payload: { peers },
@@ -91,6 +90,22 @@ class PeerManager {
         for (const [uid, socket] of this.socketsByUserId.entries()) {
             if (exceptUserId && uid === exceptUserId)
                 continue;
+            if (socket.readyState === 1) {
+                socket.send(raw);
+            }
+        }
+    }
+    // ✅ Heartbeat ping to all connected sockets
+    sendPingToAll(me) {
+        const msg = {
+            type: "PING",
+            msgId: this.newMsgId(),
+            ts: Date.now(),
+            from: me,
+            payload: {},
+        };
+        const raw = JSON.stringify(msg);
+        for (const socket of this.socketsByUserId.values()) {
             if (socket.readyState === 1) {
                 socket.send(raw);
             }
