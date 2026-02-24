@@ -1,0 +1,32 @@
+{
+  "name": "@app/desktop",
+  "private": true,
+  "version": "0.0.1",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+
+    "dev:renderer": "npm run dev --prefix renderer",
+    "build:renderer": "npm run build --prefix renderer",
+    "preview": "npm run preview --prefix renderer",
+
+    "dev:electron-build": "tsc -p electron/tsconfig.json --watch",
+    "start:electron": "wait-on tcp:5173 && electron .",
+    "dev:electron-runner": "wait-on dist-electron/main/index.js && npm run start:electron",
+    "dev:electron": "concurrently -k \"npm:dev:electron-build\" \"npm:dev:electron-runner\"",
+
+    "build": "npm run build:renderer && tsc -p electron/tsconfig.json"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "@types/ws": "^8.5.12",
+    "concurrently": "^9.0.0",
+    "electron": "^31.0.0",
+    "typescript": "^5.5.0",
+    "wait-on": "^7.2.0"
+  }
+}

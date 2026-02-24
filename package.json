@@ -1,0 +1,11 @@
+{
+  "name": "distributed-editor",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @app/desktop",
+    "build": "npm run build -w @app/desktop"
+  }
+}
