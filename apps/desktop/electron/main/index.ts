@@ -130,10 +130,12 @@ ipcMain.handle("network:connect", async (_evt, payload: { ip: string }) => {
   return true;
 });
 
-ipcMain.handle("msg:send", async (_evt, payload: { toUserId: string; text: string }) => {
-  await wsClient.sendReliable(payload.toUserId, {
-    kind: "CHAT",
-    text: payload.text,
-  });
-  return true;
+ipcMain.handle("chat:dm:send", async (_evt, payload: { toUserId: string; text: string }) => {
+  const msgId = await wsClient.sendDM(payload.toUserId, payload.text);
+  return msgId; // return msgId to renderer
+});
+
+ipcMain.handle("chat:public:send", async (_evt, payload: { text: string }) => {
+  const groupId = await wsClient.sendPublic(payload.text);
+  return groupId; // return groupId to renderer
 });

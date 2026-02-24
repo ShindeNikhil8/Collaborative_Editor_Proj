@@ -2,12 +2,17 @@ import ElectronStore from "electron-store";
 import type { PeerIdentity, MsgPayload } from "../ws/protocol";
 
 export type PendingOutboxMsg = {
-  msgId: string;
+  msgId: string;         // delivery msgId (used for ACK)
   ts: number;
   toUserId: string;
   toIp: string;
+
+  // ✅ for public aggregation
+  groupId?: string;
+
   from: PeerIdentity;
   payload: MsgPayload;
+
   attempts: number;
   lastAttemptAt?: number;
 };

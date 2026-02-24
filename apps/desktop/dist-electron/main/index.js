@@ -117,10 +117,11 @@ electron_1.ipcMain.handle("network:connect", async (_evt, payload) => {
     await wsClient.connectToPeer(payload.ip);
     return true;
 });
-electron_1.ipcMain.handle("msg:send", async (_evt, payload) => {
-    await wsClient.sendReliable(payload.toUserId, {
-        kind: "CHAT",
-        text: payload.text,
-    });
-    return true;
+electron_1.ipcMain.handle("chat:dm:send", async (_evt, payload) => {
+    const msgId = await wsClient.sendDM(payload.toUserId, payload.text);
+    return msgId; // return msgId to renderer
+});
+electron_1.ipcMain.handle("chat:public:send", async (_evt, payload) => {
+    const groupId = await wsClient.sendPublic(payload.text);
+    return groupId; // return groupId to renderer
 });

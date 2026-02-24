@@ -23,7 +23,7 @@ type StartNodeArgs = {
 export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
   const wss = new WebSocketServer({ port });
 
-  // ✅ De-dup cache: prevents showing the same message again if sender retries
+  // dedupe by delivery msgId
   const seenMsgIds = new Set<string>();
 
   wss.on("listening", () => {
@@ -37,26 +37,18 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
       try {
         const msg = JSON.parse(data.toString()) as WsEnvelope<any>;
 
-        // -------------------------
-        // HELLO handshake
-        // -------------------------
         if (msg.type === "HELLO") {
           const profile = getProfile();
           if (!profile) {
-            console.log("[WS] Reject: local profile not set");
             socket.close();
             return;
           }
 
           const me = profileToIdentity(profile);
 
-          // Save peer identity + mark online
           peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
-
-          // Map this socket to that userId
           peerManager.setSocket(msg.from.userId, socket as WebSocket);
 
-          // Reply HELLO_ACK
           const reply: WsEnvelope<HelloAckPayload> = {
             type: "HELLO_ACK",
             msgId: randomUUID(),
@@ -67,7 +59,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
 
           socket.send(JSON.stringify(reply));
 
-          // Immediately share my known peers list
           const myPeers = peerManager.getAllPeerIdentities();
           const peersMsg: WsEnvelope<PeersPayload> = {
             type: "PEERS",
@@ -81,9 +72,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           return;
         }
 
-        // -------------------------
-        // PING/PONG presence
-        // -------------------------
         if (msg.type === "PING") {
           const profile = getProfile();
           if (!profile) return;
@@ -105,9 +93,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           return;
         }
 
-        // -------------------------
-        // PEERS gossip
-        // -------------------------
         if (msg.type === "PEERS") {
           const profile = getProfile();
           if (!profile) return;
@@ -120,12 +105,9 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             if (p.userId === me.userId) continue;
 
             peerManager.upsertPeer(p, { lastSeen: Date.now(), discoveredVia: msg.from });
-
-            // auto-connect to discovered peers
             wsClient.connectToPeer(p.ip).catch(() => {});
           }
 
-          // ACK for peers list (optional)
           const ack: WsEnvelope<PeersAckPayload> = {
             type: "PEERS_ACK",
             msgId: randomUUID(),
@@ -135,31 +117,38 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           };
           socket.send(JSON.stringify(ack));
 
-          // forward to everyone else
           peerManager.broadcastPeers(list, me, msg.from.userId);
           return;
         }
 
-        // -------------------------
-        // ✅ RELIABLE MSG receive + UI forward + ACK
-        // -------------------------
+        // ✅ MSG receive: show in UI + always ACK
         if (msg.type === "MSG") {
           const profile = getProfile();
           if (!profile) return;
 
-          // Update presence for sender
           peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
 
           const payload = msg.payload as MsgPayload;
 
-          const alreadySeen = seenMsgIds.has(msg.msgId);
+          // DM safety: only accept DM if it's addressed to me
+          const me = profileToIdentity(profile);
+          if (payload.scope === "DM" && payload.toUserId && payload.toUserId !== me.userId) {
+            // still ACK to stop retries (but ignore content)
+            const ackIgnore: WsEnvelope<AckPayload> = {
+              type: "ACK",
+              msgId: randomUUID(),
+              ts: Date.now(),
+              from: me,
+              payload: { ackMsgId: msg.msgId },
+            };
+            socket.send(JSON.stringify(ackIgnore));
+            return;
+          }
 
-          // ✅ Only show/store once (dedupe)
+          const alreadySeen = seenMsgIds.has(msg.msgId);
           if (!alreadySeen) {
             seenMsgIds.add(msg.msgId);
 
-            // ✅ Forward to renderer UI (Messages panel)
-            // This requires peerManager.emitToUI(...) method (we’ll add if not present)
             peerManager.emitToUI("msg:received", {
               msgId: msg.msgId,
               from: msg.from,
@@ -168,30 +157,25 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             });
           }
 
-          // ✅ ALWAYS ACK (even if duplicate)
           const ack: WsEnvelope<AckPayload> = {
             type: "ACK",
             msgId: randomUUID(),
             ts: Date.now(),
-            from: profileToIdentity(profile),
+            from: me,
             payload: { ackMsgId: msg.msgId },
           };
 
           socket.send(JSON.stringify(ack));
           return;
         }
-
-        // ACK is processed by wsClient (outgoing side)
-        if (msg.type === "ACK") return;
-      } catch (e) {
-        console.log("[WS] invalid message:", e);
+      } catch {
+        // ignore
       }
     });
 
     socket.on("close", () => {
       const uid = peerManager.removeSocketBySocket(socket as WebSocket);
       if (uid) peerManager.markOffline(uid);
-      console.log("[WS] connection closed");
     });
   });
 }

@@ -208,11 +208,11 @@ export default function NetworkPanel() {
 
             {/* ✅ ADD TEST MSG BUTTON HERE */}
             <button
-              onClick={() => window.api.sendMsg(p.userId, `Hello from ${profile?.name ?? "me"}`)}
+              onClick={() => window.api.sendDM(p.userId, `Hello from ${profile?.name ?? "me"}`)}
               disabled={p.status !== "online"}
-              title={p.status !== "online" ? "Peer must be online" : "Send a test message"}
+              title={p.status !== "online" ? "Peer must be online" : "Send a test DM"}
             >
-              Test MSG
+              Test DM
             </button>
           </div>
         </div>

@@ -133,7 +133,7 @@ class PeerManager {
     return randomUUID();
   }
 
-  emitToUI(channel: string, payload: any) {
+  emitToUI(channel: string, payload: unknown) {
     const win = this.getWindow();
     if (!win) return;
     win.webContents.send(channel, payload);
