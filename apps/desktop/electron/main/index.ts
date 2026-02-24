@@ -130,8 +130,8 @@ ipcMain.handle("network:connect", async (_evt, payload: { ip: string }) => {
   return true;
 });
 
-ipcMain.handle("msg:send", async (_evt, payload: { toUserId: string; toIp: string; text: string }) => {
-  await wsClient.sendReliable(payload.toUserId, payload.toIp, {
+ipcMain.handle("msg:send", async (_evt, payload: { toUserId: string; text: string }) => {
+  await wsClient.sendReliable(payload.toUserId, {
     kind: "CHAT",
     text: payload.text,
   });

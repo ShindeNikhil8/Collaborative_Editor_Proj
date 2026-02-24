@@ -7,6 +7,8 @@ const profileStore_1 = require("../store/profileStore");
 const protocol_1 = require("./protocol");
 function startWsNode({ port, peerManager, wsClient }) {
     const wss = new ws_1.WebSocketServer({ port });
+    // ✅ De-dup cache (in-memory for now)
+    const seenMsgIds = new Set();
     wss.on("listening", () => {
         console.log(`[WS] Node listening on ws://localhost:${port}`);
     });
@@ -33,7 +35,6 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { accepted: true },
                     };
                     socket.send(JSON.stringify(reply));
-                    // send my known peers immediately
                     const myPeers = peerManager.getAllPeerIdentities();
                     const peersMsg = {
                         type: "PEERS",
@@ -87,17 +88,20 @@ function startWsNode({ port, peerManager, wsClient }) {
                     peerManager.broadcastPeers(list, me, msg.from.userId);
                     return;
                 }
-                // ✅ Receive reliable MSG and ACK it
+                // ✅ Receive MSG + dedupe + always ACK
                 if (msg.type === "MSG") {
                     const profile = (0, profileStore_1.getProfile)();
                     if (!profile)
                         return;
-                    // update last seen of sender
                     peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
                     const payload = msg.payload;
-                    // For now just print; later we emit to renderer (chat UI)
-                    console.log("[MSG] from", msg.from.name, payload);
-                    // Send ACK back
+                    const alreadySeen = seenMsgIds.has(msg.msgId);
+                    if (!alreadySeen) {
+                        seenMsgIds.add(msg.msgId);
+                        console.log("[MSG] from", msg.from.name, payload);
+                        // later: send to renderer UI
+                    }
+                    // ALWAYS ACK (even if duplicate)
                     const ack = {
                         type: "ACK",
                         msgId: (0, crypto_1.randomUUID)(),
@@ -106,10 +110,6 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { ackMsgId: msg.msgId },
                     };
                     socket.send(JSON.stringify(ack));
-                    return;
-                }
-                // ACK from incoming socket (rare) — wsClient handles outgoing ACKs
-                if (msg.type === "ACK") {
                     return;
                 }
             }

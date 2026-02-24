@@ -31,11 +31,13 @@ class PeerManager {
     };
 
     this.peersByUserId.set(peer.userId, next);
-
-    // persist identities only
     saveKnownPeers(this.getAllPeerIdentities());
-
     this.emitPeers();
+  }
+
+  // ✅ NEW: get peer by userId (authoritative routing)
+  getPeer(userId: string): Peer | null {
+    return this.peersByUserId.get(userId) ?? null;
   }
 
   setSocket(userId: string, socket: WebSocket) {
@@ -72,12 +74,6 @@ class PeerManager {
     this.upsertPeer(p, { status: "offline", lastSeen: Date.now() });
   }
 
-  markConnecting(userId: string) {
-    const p = this.peersByUserId.get(userId);
-    if (!p) return;
-    this.upsertPeer(p, { status: "connecting", lastSeen: Date.now() });
-  }
-
   getPeersSnapshot(): Peer[] {
     return Array.from(this.peersByUserId.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
@@ -98,7 +94,6 @@ class PeerManager {
     win.webContents.send("peers:update", this.getPeersSnapshot());
   }
 
-  // Broadcast PEERS to all sockets (except one)
   broadcastPeers(peers: PeerIdentity[], envelopeFrom: PeerIdentity, exceptUserId?: string) {
     const msg: WsEnvelope<PeersPayload> = {
       type: "PEERS",
@@ -118,7 +113,6 @@ class PeerManager {
     }
   }
 
-  // ✅ Heartbeat ping to all connected sockets
   sendPingToAll(me: PeerIdentity) {
     const msg = {
       type: "PING",
@@ -131,9 +125,7 @@ class PeerManager {
     const raw = JSON.stringify(msg);
 
     for (const socket of this.socketsByUserId.values()) {
-      if ((socket as any).readyState === 1) {
-        socket.send(raw);
-      }
+      if ((socket as any).readyState === 1) socket.send(raw);
     }
   }
 

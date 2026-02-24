@@ -118,7 +118,7 @@ electron_1.ipcMain.handle("network:connect", async (_evt, payload) => {
     return true;
 });
 electron_1.ipcMain.handle("msg:send", async (_evt, payload) => {
-    await wsClient.sendReliable(payload.toUserId, payload.toIp, {
+    await wsClient.sendReliable(payload.toUserId, {
         kind: "CHAT",
         text: payload.text,
     });

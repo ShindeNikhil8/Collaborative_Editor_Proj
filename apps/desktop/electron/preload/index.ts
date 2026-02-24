@@ -20,6 +20,6 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener("peers:update", handler);
   },
 
-  sendMsg: (toUserId: string, toIp: string, text: string) =>
-  ipcRenderer.invoke("msg:send", { toUserId, toIp, text }),
+  sendMsg: (toUserId: string, text: string) =>
+  ipcRenderer.invoke("msg:send", { toUserId, text }),
 });

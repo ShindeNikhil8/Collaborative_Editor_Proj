@@ -34,7 +34,7 @@ declare global {
       connectToPeer: (ip: string) => Promise<boolean>;
       onPeersUpdate: (cb: (peers: Peer[]) => void) => () => void;
 
-      sendMsg: (toUserId: string, toIp: string, text: string) => Promise<boolean>;
+      sendMsg: (toUserId: string, text: string) => Promise<boolean>;
     };
   }
 }

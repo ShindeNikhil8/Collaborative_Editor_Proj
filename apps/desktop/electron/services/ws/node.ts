@@ -23,6 +23,9 @@ type StartNodeArgs = {
 export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
   const wss = new WebSocketServer({ port });
 
+  // ✅ De-dup cache (in-memory for now)
+  const seenMsgIds = new Set<string>();
+
   wss.on("listening", () => {
     console.log(`[WS] Node listening on ws://localhost:${port}`);
   });
@@ -57,7 +60,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
 
           socket.send(JSON.stringify(reply));
 
-          // send my known peers immediately
           const myPeers = peerManager.getAllPeerIdentities();
           const peersMsg: WsEnvelope<PeersPayload> = {
             type: "PEERS",
@@ -120,20 +122,23 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           return;
         }
 
-        // ✅ Receive reliable MSG and ACK it
+        // ✅ Receive MSG + dedupe + always ACK
         if (msg.type === "MSG") {
           const profile = getProfile();
           if (!profile) return;
 
-          // update last seen of sender
           peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
 
           const payload = msg.payload as MsgPayload;
+          const alreadySeen = seenMsgIds.has(msg.msgId);
 
-          // For now just print; later we emit to renderer (chat UI)
-          console.log("[MSG] from", msg.from.name, payload);
+          if (!alreadySeen) {
+            seenMsgIds.add(msg.msgId);
+            console.log("[MSG] from", msg.from.name, payload);
+            // later: send to renderer UI
+          }
 
-          // Send ACK back
+          // ALWAYS ACK (even if duplicate)
           const ack: WsEnvelope<AckPayload> = {
             type: "ACK",
             msgId: randomUUID(),
@@ -143,11 +148,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           };
 
           socket.send(JSON.stringify(ack));
-          return;
-        }
-
-        // ACK from incoming socket (rare) — wsClient handles outgoing ACKs
-        if (msg.type === "ACK") {
           return;
         }
       } catch (e) {
