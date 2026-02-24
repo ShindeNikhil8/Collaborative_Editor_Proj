@@ -4,7 +4,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadOutbox = loadOutbox;
-exports.saveOutbox = saveOutbox;
 exports.upsertOutbox = upsertOutbox;
 exports.removeOutbox = removeOutbox;
 const electron_store_1 = __importDefault(require("electron-store"));
@@ -25,6 +24,5 @@ function upsertOutbox(msg) {
     saveOutbox(list);
 }
 function removeOutbox(msgId) {
-    const list = loadOutbox().filter((m) => m.msgId !== msgId);
-    saveOutbox(list);
+    saveOutbox(loadOutbox().filter((m) => m.msgId !== msgId));
 }

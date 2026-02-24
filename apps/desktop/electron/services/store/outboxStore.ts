@@ -2,14 +2,10 @@ import ElectronStore from "electron-store";
 import type { PeerIdentity, MsgPayload } from "../ws/protocol";
 
 export type PendingOutboxMsg = {
-  msgId: string;         // delivery msgId (used for ACK)
+  msgId: string;
   ts: number;
   toUserId: string;
   toIp: string;
-
-  // ✅ for public aggregation
-  groupId?: string;
-
   from: PeerIdentity;
   payload: MsgPayload;
 
@@ -27,7 +23,7 @@ export function loadOutbox(): PendingOutboxMsg[] {
   return store.get("outbox") ?? [];
 }
 
-export function saveOutbox(list: PendingOutboxMsg[]) {
+function saveOutbox(list: PendingOutboxMsg[]) {
   store.set("outbox", list);
 }
 
@@ -40,6 +36,5 @@ export function upsertOutbox(msg: PendingOutboxMsg) {
 }
 
 export function removeOutbox(msgId: string) {
-  const list = loadOutbox().filter((m) => m.msgId !== msgId);
-  saveOutbox(list);
+  saveOutbox(loadOutbox().filter((m) => m.msgId !== msgId));
 }

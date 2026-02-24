@@ -10,6 +10,8 @@ const profileStore_1 = require("../services/store/profileStore");
 const peerManager_1 = require("../services/ws/peerManager");
 const wsClient_1 = require("../services/ws/wsClient");
 const peersStore_1 = require("../services/store/peersStore");
+const chatStore_1 = require("../services/store/chatStore");
+const protocol_1 = require("../services/ws/protocol");
 const DEV_URL = "http://localhost:5173";
 const WS_PORT = 3002;
 let mainWindow = null;
@@ -26,62 +28,23 @@ function createWindow() {
         },
     });
     mainWindow.loadURL(DEV_URL);
-    // DevTools only in dev
     if (!electron_1.app.isPackaged) {
         mainWindow.webContents.openDevTools({ mode: "detach" });
     }
 }
 electron_1.app.whenReady().then(() => {
-    // Start WS node
     (0, node_1.startWsNode)({ port: WS_PORT, peerManager, wsClient });
-    // Create window first (so peer updates can reach UI)
     createWindow();
-    // Load known peers and show them offline initially
     const known = (0, peersStore_1.loadKnownPeers)();
-    for (const p of known) {
+    for (const p of known)
         peerManager.upsertPeer(p, { status: "offline" });
-    }
-    // Auto reconnect on startup
-    for (const p of known) {
+    for (const p of known)
         wsClient.connectToPeer(p.ip).catch(() => { });
-    }
-    // ✅ Heartbeat: ping everyone every 15 seconds
-    setInterval(() => {
-        const profile = (0, profileStore_1.getProfile)();
-        if (!profile)
-            return;
-        const me = { userId: profile.userId, name: profile.name, ip: profile.ip };
-        peerManager.sendPingToAll(me);
-    }, 15_000);
-    // ✅ Offline timeout: if no lastSeen for 45s => offline
-    setInterval(() => {
-        const now = Date.now();
-        const peers = peerManager.getPeersSnapshot();
-        for (const p of peers) {
-            if (p.status === "online" && now - p.lastSeen > 45_000) {
-                peerManager.markOffline(p.userId);
-            }
-        }
-    }, 10_000);
-    // ✅ Auto-reconnect: try connecting to offline peers periodically
-    setInterval(() => {
-        const peers = peerManager.getPeersSnapshot();
-        for (const p of peers) {
-            if (p.status === "offline") {
-                wsClient.connectToPeer(p.ip).catch(() => { });
-            }
-        }
-    }, 20_000);
-    // ✅ Resume / suspend handling
+    // reconnect after sleep
     electron_1.powerMonitor.on("resume", () => {
-        console.log("[POWER] resume detected, reconnecting...");
-        const peers = peerManager.getPeersSnapshot();
-        for (const p of peers) {
+        const peers = peerManager.getAllPeerIdentities();
+        for (const p of peers)
             wsClient.connectToPeer(p.ip).catch(() => { });
-        }
-    });
-    electron_1.powerMonitor.on("suspend", () => {
-        console.log("[POWER] suspend detected");
     });
     electron_1.app.on("activate", () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0)
@@ -117,11 +80,39 @@ electron_1.ipcMain.handle("network:connect", async (_evt, payload) => {
     await wsClient.connectToPeer(payload.ip);
     return true;
 });
+// history
+electron_1.ipcMain.handle("chat:history:get", async () => (0, chatStore_1.loadChatHistory)());
+electron_1.ipcMain.handle("chat:history:clear", async () => {
+    (0, chatStore_1.clearChatHistory)();
+    return true;
+});
+// DM send (queues if offline)
 electron_1.ipcMain.handle("chat:dm:send", async (_evt, payload) => {
     const msgId = await wsClient.sendDM(payload.toUserId, payload.text);
-    return msgId; // return msgId to renderer
+    const prof = (0, profileStore_1.getProfile)();
+    if (prof) {
+        (0, chatStore_1.appendChatMessage)({
+            msgId,
+            ts: Date.now(),
+            from: (0, protocol_1.profileToIdentity)(prof),
+            payload: { kind: "CHAT", text: payload.text, scope: "DM", toUserId: payload.toUserId },
+            direction: "out",
+        });
+    }
+    return msgId;
 });
+// PUBLIC send (queues to everyone)
 electron_1.ipcMain.handle("chat:public:send", async (_evt, payload) => {
     const groupId = await wsClient.sendPublic(payload.text);
-    return groupId; // return groupId to renderer
+    const prof = (0, profileStore_1.getProfile)();
+    if (prof) {
+        (0, chatStore_1.appendChatMessage)({
+            msgId: groupId,
+            ts: Date.now(),
+            from: (0, protocol_1.profileToIdentity)(prof),
+            payload: { kind: "CHAT", text: payload.text, scope: "PUBLIC", groupId },
+            direction: "out",
+        });
+    }
+    return groupId;
 });

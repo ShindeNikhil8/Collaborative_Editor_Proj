@@ -24,7 +24,12 @@ class PeerManager {
         (0, peersStore_1.saveKnownPeers)(this.getAllPeerIdentities());
         this.emitPeers();
     }
-    // ✅ NEW: get peer by userId (authoritative routing)
+    getPeerIdentity(userId) {
+        const p = this.peersByUserId.get(userId);
+        if (!p)
+            return null;
+        return { userId: p.userId, name: p.name, ip: p.ip };
+    }
     getPeer(userId) {
         return this.peersByUserId.get(userId) ?? null;
     }
@@ -32,7 +37,7 @@ class PeerManager {
         this.socketsByUserId.set(userId, socket);
     }
     getSocket(userId) {
-        return this.socketsByUserId.get(userId);
+        return this.socketsByUserId.get(userId) ?? null;
     }
     removeSocket(userId) {
         this.socketsByUserId.delete(userId);
@@ -74,6 +79,12 @@ class PeerManager {
             return;
         win.webContents.send("peers:update", this.getPeersSnapshot());
     }
+    emitToUI(channel, payload) {
+        const win = this.getWindow();
+        if (!win)
+            return;
+        win.webContents.send(channel, payload);
+    }
     broadcastPeers(peers, envelopeFrom, exceptUserId) {
         const msg = {
             type: "PEERS",
@@ -86,9 +97,8 @@ class PeerManager {
         for (const [uid, socket] of this.socketsByUserId.entries()) {
             if (exceptUserId && uid === exceptUserId)
                 continue;
-            if (socket.readyState === 1) {
+            if (socket.readyState === 1)
                 socket.send(raw);
-            }
         }
     }
     sendPingToAll(me) {
@@ -107,12 +117,6 @@ class PeerManager {
     }
     newMsgId() {
         return (0, crypto_1.randomUUID)();
-    }
-    emitToUI(channel, payload) {
-        const win = this.getWindow();
-        if (!win)
-            return;
-        win.webContents.send(channel, payload);
     }
 }
 function createPeerManager(getWindow) {

@@ -19,30 +19,28 @@ export type Peer = {
   discoveredVia?: { userId: string; name: string; ip: string };
 };
 
+export type ChatScope = "DM" | "PUBLIC";
+
 export type UiMessageKind = "CHAT" | "SYSTEM" | "FILE_EVENT";
-export type ChatScope = "PUBLIC" | "DM";
+
+export type UiMessagePayload = {
+  kind: UiMessageKind;
+  text: string;
+  scope: ChatScope;
+  toUserId?: string;
+  groupId?: string;
+  fileRef?: unknown;
+};
 
 export type UiMessage = {
   msgId: string;
-  from: { userId: string; name: string; ip: string };
   ts: number;
-  payload: { kind: UiMessageKind; text: string; scope: ChatScope; toUserId?: string; groupId?: string; fileRef?: unknown };
-
-  // ✅ UI metadata
-  direction: "in" | "out";
-  threadKey: string; // "public" or `dm:<otherUserId>`
-  status?: "queued" | "sent" | "delivered" | "failed";
-  progress?: { delivered: number; total: number }; // for public
-};
-
-export type UiMsgStatusEvent = {
-  msgId: string; // msgId for DM OR groupId for PUBLIC
-  status: "queued" | "sent" | "delivered" | "failed";
-  toUserId: string; // "PUBLIC" for public aggregation
-  scope: ChatScope;
-  groupId?: string;
-  delivered?: number;
-  total?: number;
+  from: { userId: string; name: string; ip: string };
+  payload: UiMessagePayload;
+  direction?: "in" | "out";
+  threadKey?: string;
+  status?: string;
+  progress?: { delivered: number; total: number };
 };
 
 declare global {
@@ -58,11 +56,16 @@ declare global {
       connectToPeer: (ip: string) => Promise<boolean>;
       onPeersUpdate: (cb: (peers: Peer[]) => void) => () => void;
 
-      // ✅ chat
-      sendDM: (toUserId: string, text: string) => Promise<string>;     // returns msgId
-      sendPublic: (text: string) => Promise<string>;                   // returns groupId
-      onMsgReceived: (cb: (m: unknown) => void) => () => void;             // we validate in store
-      onMsgStatus: (cb: (s: UiMsgStatusEvent) => void) => () => void;
+      // history
+      getChatHistory: () => Promise<UiMessage[]>;
+      clearChatHistory: () => Promise<boolean>;
+
+      // send
+      sendDM: (toUserId: string, text: string) => Promise<string>;
+      sendPublic: (text: string) => Promise<string>;
+
+      // receive
+      onMsgReceived: (cb: (m: UiMessage) => void) => () => void;
     };
   }
 }

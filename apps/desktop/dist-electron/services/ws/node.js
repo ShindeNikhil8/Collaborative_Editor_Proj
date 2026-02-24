@@ -5,9 +5,9 @@ const ws_1 = require("ws");
 const crypto_1 = require("crypto");
 const profileStore_1 = require("../store/profileStore");
 const protocol_1 = require("./protocol");
+const chatStore_1 = require("../store/chatStore");
 function startWsNode({ port, peerManager, wsClient }) {
     const wss = new ws_1.WebSocketServer({ port });
-    // dedupe by delivery msgId
     const seenMsgIds = new Set();
     wss.on("listening", () => {
         console.log(`[WS] Node listening on ws://localhost:${port}`);
@@ -87,17 +87,15 @@ function startWsNode({ port, peerManager, wsClient }) {
                     peerManager.broadcastPeers(list, me, msg.from.userId);
                     return;
                 }
-                // ✅ MSG receive: show in UI + always ACK
                 if (msg.type === "MSG") {
                     const profile = (0, profileStore_1.getProfile)();
                     if (!profile)
                         return;
+                    const me = (0, protocol_1.profileToIdentity)(profile);
                     peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
                     const payload = msg.payload;
-                    // DM safety: only accept DM if it's addressed to me
-                    const me = (0, protocol_1.profileToIdentity)(profile);
+                    // DM safety: accept only if addressed to me
                     if (payload.scope === "DM" && payload.toUserId && payload.toUserId !== me.userId) {
-                        // still ACK to stop retries (but ignore content)
                         const ackIgnore = {
                             type: "ACK",
                             msgId: (0, crypto_1.randomUUID)(),
@@ -108,13 +106,19 @@ function startWsNode({ port, peerManager, wsClient }) {
                         socket.send(JSON.stringify(ackIgnore));
                         return;
                     }
-                    const alreadySeen = seenMsgIds.has(msg.msgId);
-                    if (!alreadySeen) {
+                    if (!seenMsgIds.has(msg.msgId)) {
                         seenMsgIds.add(msg.msgId);
+                        (0, chatStore_1.appendChatMessage)({
+                            msgId: msg.msgId,
+                            ts: msg.ts ?? Date.now(),
+                            from: msg.from,
+                            payload,
+                            direction: "in",
+                        });
                         peerManager.emitToUI("msg:received", {
                             msgId: msg.msgId,
+                            ts: msg.ts ?? Date.now(),
                             from: msg.from,
-                            ts: msg.ts,
                             payload,
                         });
                     }
@@ -129,8 +133,8 @@ function startWsNode({ port, peerManager, wsClient }) {
                     return;
                 }
             }
-            catch {
-                // ignore
+            catch (e) {
+                console.log("[WS] invalid message:", e);
             }
         });
         socket.on("close", () => {

@@ -18,7 +18,7 @@ export type WsType =
 
 export type WsEnvelope<TPayload> = {
   type: WsType;
-  msgId: string; // unique per peer delivery
+  msgId: string;
   ts: number;
   from: PeerIdentity;
   payload: TPayload;
@@ -29,41 +29,30 @@ export type HelloPayload = {
   version: "0.0.1";
 };
 
-export type HelloAckPayload = {
-  accepted: true;
-};
+export type HelloAckPayload = { accepted: true };
 
-export type PeersPayload = {
-  peers: PeerIdentity[];
-};
+export type PeersPayload = { peers: PeerIdentity[] };
 
-export type PeersAckPayload = {
-  received: number;
-};
+export type PeersAckPayload = { received: number };
 
-// ✅ Slack-like chat scopes
-export type ChatScope = "PUBLIC" | "DM";
+export type ChatScope = "DM" | "PUBLIC";
 
 export type MsgPayload = {
   kind: "CHAT" | "SYSTEM" | "FILE_EVENT";
   text: string;
 
-  // ✅ chat routing info
   scope: ChatScope;
 
-  // ✅ for DM messages (receiver id)
+  // DM
   toUserId?: string;
 
-  // ✅ for public messages: a logical group id shared across recipients
+  // PUBLIC
   groupId?: string;
 
-  // optional: file reference (later)
   fileRef?: { path: string; line: number; col?: number };
 };
 
-export type AckPayload = {
-  ackMsgId: string;
-};
+export type AckPayload = { ackMsgId: string };
 
 export function profileToIdentity(p: UserProfile): PeerIdentity {
   return { userId: p.userId, name: p.name, ip: p.ip };

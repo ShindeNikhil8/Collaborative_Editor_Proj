@@ -13,6 +13,7 @@ import type {
   MsgPayload,
   AckPayload,
 } from "./protocol";
+import { appendChatMessage } from "../store/chatStore";
 
 type StartNodeArgs = {
   port: number;
@@ -23,7 +24,6 @@ type StartNodeArgs = {
 export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
   const wss = new WebSocketServer({ port });
 
-  // dedupe by delivery msgId
   const seenMsgIds = new Set<string>();
 
   wss.on("listening", () => {
@@ -56,7 +56,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             from: me,
             payload: { accepted: true },
           };
-
           socket.send(JSON.stringify(reply));
 
           const myPeers = peerManager.getAllPeerIdentities();
@@ -67,7 +66,6 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             from: me,
             payload: { peers: [me, ...myPeers] },
           };
-
           socket.send(JSON.stringify(peersMsg));
           return;
         }
@@ -121,19 +119,18 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           return;
         }
 
-        // ✅ MSG receive: show in UI + always ACK
         if (msg.type === "MSG") {
           const profile = getProfile();
           if (!profile) return;
+
+          const me = profileToIdentity(profile);
 
           peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
 
           const payload = msg.payload as MsgPayload;
 
-          // DM safety: only accept DM if it's addressed to me
-          const me = profileToIdentity(profile);
+          // DM safety: accept only if addressed to me
           if (payload.scope === "DM" && payload.toUserId && payload.toUserId !== me.userId) {
-            // still ACK to stop retries (but ignore content)
             const ackIgnore: WsEnvelope<AckPayload> = {
               type: "ACK",
               msgId: randomUUID(),
@@ -145,14 +142,21 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             return;
           }
 
-          const alreadySeen = seenMsgIds.has(msg.msgId);
-          if (!alreadySeen) {
+          if (!seenMsgIds.has(msg.msgId)) {
             seenMsgIds.add(msg.msgId);
+
+            appendChatMessage({
+              msgId: msg.msgId,
+              ts: msg.ts ?? Date.now(),
+              from: msg.from,
+              payload,
+              direction: "in",
+            });
 
             peerManager.emitToUI("msg:received", {
               msgId: msg.msgId,
+              ts: msg.ts ?? Date.now(),
               from: msg.from,
-              ts: msg.ts,
               payload,
             });
           }
@@ -164,12 +168,11 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
             from: me,
             payload: { ackMsgId: msg.msgId },
           };
-
           socket.send(JSON.stringify(ack));
           return;
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        console.log("[WS] invalid message:", e);
       }
     });
 

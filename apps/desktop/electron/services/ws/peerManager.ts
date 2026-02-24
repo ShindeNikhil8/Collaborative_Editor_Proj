@@ -35,7 +35,12 @@ class PeerManager {
     this.emitPeers();
   }
 
-  // ✅ NEW: get peer by userId (authoritative routing)
+  getPeerIdentity(userId: string): PeerIdentity | null {
+    const p = this.peersByUserId.get(userId);
+    if (!p) return null;
+    return { userId: p.userId, name: p.name, ip: p.ip };
+  }
+
   getPeer(userId: string): Peer | null {
     return this.peersByUserId.get(userId) ?? null;
   }
@@ -45,7 +50,7 @@ class PeerManager {
   }
 
   getSocket(userId: string) {
-    return this.socketsByUserId.get(userId);
+    return this.socketsByUserId.get(userId) ?? null;
   }
 
   removeSocket(userId: string) {
@@ -94,6 +99,12 @@ class PeerManager {
     win.webContents.send("peers:update", this.getPeersSnapshot());
   }
 
+  emitToUI(channel: string, payload: unknown) {
+    const win = this.getWindow();
+    if (!win) return;
+    win.webContents.send(channel, payload);
+  }
+
   broadcastPeers(peers: PeerIdentity[], envelopeFrom: PeerIdentity, exceptUserId?: string) {
     const msg: WsEnvelope<PeersPayload> = {
       type: "PEERS",
@@ -107,9 +118,7 @@ class PeerManager {
 
     for (const [uid, socket] of this.socketsByUserId.entries()) {
       if (exceptUserId && uid === exceptUserId) continue;
-      if ((socket as any).readyState === 1) {
-        socket.send(raw);
-      }
+      if ((socket as any).readyState === 1) socket.send(raw);
     }
   }
 
@@ -131,12 +140,6 @@ class PeerManager {
 
   newMsgId() {
     return randomUUID();
-  }
-
-  emitToUI(channel: string, payload: unknown) {
-    const win = this.getWindow();
-    if (!win) return;
-    win.webContents.send(channel, payload);
   }
 }
 

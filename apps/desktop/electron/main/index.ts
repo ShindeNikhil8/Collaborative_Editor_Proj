@@ -1,10 +1,14 @@
 import { app, BrowserWindow, ipcMain, powerMonitor } from "electron";
 import path from "path";
+
 import { startWsNode } from "../services/ws/node";
 import { getProfile, saveProfile, clearProfile } from "../services/store/profileStore";
 import { createPeerManager } from "../services/ws/peerManager";
 import { createWsClient } from "../services/ws/wsClient";
 import { loadKnownPeers } from "../services/store/peersStore";
+
+import { loadChatHistory, clearChatHistory, appendChatMessage } from "../services/store/chatStore";
+import { profileToIdentity } from "../services/ws/protocol";
 
 const DEV_URL = "http://localhost:5173";
 const WS_PORT = 3002;
@@ -27,70 +31,24 @@ function createWindow() {
 
   mainWindow.loadURL(DEV_URL);
 
-  // DevTools only in dev
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 }
 
 app.whenReady().then(() => {
-  // Start WS node
   startWsNode({ port: WS_PORT, peerManager, wsClient });
 
-  // Create window first (so peer updates can reach UI)
   createWindow();
 
-  // Load known peers and show them offline initially
   const known = loadKnownPeers();
-  for (const p of known) {
-    peerManager.upsertPeer(p, { status: "offline" });
-  }
+  for (const p of known) peerManager.upsertPeer(p, { status: "offline" });
+  for (const p of known) wsClient.connectToPeer(p.ip).catch(() => {});
 
-  // Auto reconnect on startup
-  for (const p of known) {
-    wsClient.connectToPeer(p.ip).catch(() => {});
-  }
-
-  // ✅ Heartbeat: ping everyone every 15 seconds
-  setInterval(() => {
-    const profile = getProfile();
-    if (!profile) return;
-    const me = { userId: profile.userId, name: profile.name, ip: profile.ip };
-    peerManager.sendPingToAll(me);
-  }, 15_000);
-
-  // ✅ Offline timeout: if no lastSeen for 45s => offline
-  setInterval(() => {
-    const now = Date.now();
-    const peers = peerManager.getPeersSnapshot();
-    for (const p of peers) {
-      if (p.status === "online" && now - p.lastSeen > 45_000) {
-        peerManager.markOffline(p.userId);
-      }
-    }
-  }, 10_000);
-
-  // ✅ Auto-reconnect: try connecting to offline peers periodically
-  setInterval(() => {
-    const peers = peerManager.getPeersSnapshot();
-    for (const p of peers) {
-      if (p.status === "offline") {
-        wsClient.connectToPeer(p.ip).catch(() => {});
-      }
-    }
-  }, 20_000);
-
-  // ✅ Resume / suspend handling
+  // reconnect after sleep
   powerMonitor.on("resume", () => {
-    console.log("[POWER] resume detected, reconnecting...");
-    const peers = peerManager.getPeersSnapshot();
-    for (const p of peers) {
-      wsClient.connectToPeer(p.ip).catch(() => {});
-    }
-  });
-
-  powerMonitor.on("suspend", () => {
-    console.log("[POWER] suspend detected");
+    const peers = peerManager.getAllPeerIdentities();
+    for (const p of peers) wsClient.connectToPeer(p.ip).catch(() => {});
   });
 
   app.on("activate", () => {
@@ -104,6 +62,7 @@ app.on("window-all-closed", () => {
 
 // IPC
 ipcMain.handle("app:ping", async () => "pong");
+
 ipcMain.handle("profile:get", async () => getProfile());
 
 ipcMain.handle("profile:save", async (_evt, payload: { name: string; email: string; ip: string }) => {
@@ -130,12 +89,43 @@ ipcMain.handle("network:connect", async (_evt, payload: { ip: string }) => {
   return true;
 });
 
-ipcMain.handle("chat:dm:send", async (_evt, payload: { toUserId: string; text: string }) => {
-  const msgId = await wsClient.sendDM(payload.toUserId, payload.text);
-  return msgId; // return msgId to renderer
+// history
+ipcMain.handle("chat:history:get", async () => loadChatHistory());
+ipcMain.handle("chat:history:clear", async () => {
+  clearChatHistory();
+  return true;
 });
 
+// DM send (queues if offline)
+ipcMain.handle("chat:dm:send", async (_evt, payload: { toUserId: string; text: string }) => {
+  const msgId = await wsClient.sendDM(payload.toUserId, payload.text);
+
+  const prof = getProfile();
+  if (prof) {
+    appendChatMessage({
+      msgId,
+      ts: Date.now(),
+      from: profileToIdentity(prof),
+      payload: { kind: "CHAT", text: payload.text, scope: "DM", toUserId: payload.toUserId },
+      direction: "out",
+    });
+  }
+  return msgId;
+});
+
+// PUBLIC send (queues to everyone)
 ipcMain.handle("chat:public:send", async (_evt, payload: { text: string }) => {
   const groupId = await wsClient.sendPublic(payload.text);
-  return groupId; // return groupId to renderer
+
+  const prof = getProfile();
+  if (prof) {
+    appendChatMessage({
+      msgId: groupId,
+      ts: Date.now(),
+      from: profileToIdentity(prof),
+      payload: { kind: "CHAT", text: payload.text, scope: "PUBLIC", groupId },
+      direction: "out",
+    });
+  }
+  return groupId;
 });
