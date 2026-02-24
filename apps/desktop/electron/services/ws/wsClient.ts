@@ -57,15 +57,19 @@ export function createWsClient(peerManager: PeerManager) {
           console.log("[WS-CLIENT] HELLO_ACK from", remote.name, remote.ip);
 
           // ✅ send my known peers to them (gossip)
+         const me = profileToIdentity(profile);
           const myKnown = peerManager.getAllPeerIdentities();
 
+          // ✅ include myself so the other side learns "who connected"
           const peersMsg: WsEnvelope<PeersPayload> = {
             type: "PEERS",
             msgId: randomUUID(),
             ts: Date.now(),
-            from: profileToIdentity(profile),
-            payload: { peers: myKnown },
+            from: me,
+            payload: { peers: [me, ...myKnown] },
           };
+
+          ws.send(JSON.stringify(peersMsg));
 
           ws.send(JSON.stringify(peersMsg));
           return;

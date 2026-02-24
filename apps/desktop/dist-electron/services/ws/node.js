@@ -34,6 +34,16 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { accepted: true },
                     };
                     socket.send(JSON.stringify(reply));
+                    // ✅ Immediately send my known peers (so new peer learns B etc.)
+                    const myPeers = peerManager.getAllPeerIdentities();
+                    const peersMsg = {
+                        type: "PEERS",
+                        msgId: (0, crypto_1.randomUUID)(),
+                        ts: Date.now(),
+                        from: (0, protocol_1.profileToIdentity)(profile),
+                        payload: { peers: [(0, protocol_1.profileToIdentity)(profile), ...myPeers] },
+                    };
+                    socket.send(JSON.stringify(peersMsg));
                     return;
                 }
                 if (msg.type === "PING") {

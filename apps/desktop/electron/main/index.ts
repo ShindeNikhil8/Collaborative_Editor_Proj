@@ -28,7 +28,6 @@ function createWindow() {
   mainWindow.loadURL(DEV_URL);
   mainWindow.webContents.openDevTools({ mode: "detach" });
 }
-
 app.whenReady().then(() => {
   // Start WS node
   startWsNode({ port: WS_PORT, peerManager, wsClient });

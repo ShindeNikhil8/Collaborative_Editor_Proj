@@ -7,6 +7,7 @@ import { profileToIdentity } from "./protocol";
 import type {
   WsEnvelope,
   HelloAckPayload,
+  PeersPayload,
   PeersAckPayload,
   PeerIdentity,
 } from "./protocol";
@@ -53,6 +54,19 @@ export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
           };
 
           socket.send(JSON.stringify(reply));
+
+          // ✅ Immediately send my known peers (so new peer learns B etc.)
+          const myPeers = peerManager.getAllPeerIdentities();
+
+          const peersMsg: WsEnvelope<PeersPayload> = {
+            type: "PEERS",
+            msgId: randomUUID(),
+            ts: Date.now(),
+            from: profileToIdentity(profile),
+            payload: { peers: [profileToIdentity(profile), ...myPeers] },
+          };
+
+          socket.send(JSON.stringify(peersMsg));
           return;
         }
 
