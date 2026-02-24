@@ -19,6 +19,16 @@ export type Peer = {
   discoveredVia?: { userId: string; name: string; ip: string };
 };
 
+// ✅ Messages shown in UI
+export type UiMessageKind = "CHAT" | "SYSTEM" | "FILE_EVENT";
+
+export type UiMessage = {
+  msgId: string;
+  from: { userId: string; name: string; ip: string };
+  ts: number;
+  payload: { kind: UiMessageKind; text: string; fileRef?: unknown };
+};
+
 declare global {
   interface Window {
     api: {
@@ -34,7 +44,9 @@ declare global {
       connectToPeer: (ip: string) => Promise<boolean>;
       onPeersUpdate: (cb: (peers: Peer[]) => void) => () => void;
 
+      // messaging
       sendMsg: (toUserId: string, text: string) => Promise<boolean>;
+      onMsgReceived: (cb: (m: UiMessage) => void) => () => void;
     };
   }
 }

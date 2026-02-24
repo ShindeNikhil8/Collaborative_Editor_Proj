@@ -22,4 +22,10 @@ contextBridge.exposeInMainWorld("api", {
 
   sendMsg: (toUserId: string, text: string) =>
   ipcRenderer.invoke("msg:send", { toUserId, text }),
+
+  onMsgReceived: (cb: (m: unknown) => void) => {
+    const handler = (_event: unknown, m: unknown) => cb(m);
+  ipcRenderer.on("msg:received", handler);
+    return () => ipcRenderer.removeListener("msg:received", handler);
+  },
 });

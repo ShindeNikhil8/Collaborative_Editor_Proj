@@ -132,6 +132,12 @@ class PeerManager {
   newMsgId() {
     return randomUUID();
   }
+
+  emitToUI(channel: string, payload: any) {
+    const win = this.getWindow();
+    if (!win) return;
+    win.webContents.send(channel, payload);
+  }
 }
 
 export function createPeerManager(getWindow: () => BrowserWindow | null) {

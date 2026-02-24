@@ -108,6 +108,12 @@ class PeerManager {
     newMsgId() {
         return (0, crypto_1.randomUUID)();
     }
+    emitToUI(channel, payload) {
+        const win = this.getWindow();
+        if (!win)
+            return;
+        win.webContents.send(channel, payload);
+    }
 }
 function createPeerManager(getWindow) {
     return new PeerManager(getWindow);

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import NetworkPanel from "../features/network/NetworkPanel";
+import MessageConsole from "../features/chat/MessageConsole";
 
 type LeftTab = "explorer" | "network" | null;
 
@@ -54,7 +55,7 @@ export default function Workspace() {
 
         {/* RIGHT CHAT PANEL */}
         <div className="right-panel">
-          <h3>Public Chat</h3>
+          <MessageConsole />
         </div>
       </div>
     </div>
