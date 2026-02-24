@@ -4,14 +4,20 @@ import type WebSocket from "ws";
 import { getProfile } from "../store/profileStore";
 import type { PeerManager } from "./peerManager";
 import { profileToIdentity } from "./protocol";
-import type { WsEnvelope, HelloPayload, HelloAckPayload, PeersPayload, PeersAckPayload } from "./protocol";
+import type {
+  WsEnvelope,
+  HelloAckPayload,
+  PeersAckPayload,
+  PeerIdentity,
+} from "./protocol";
 
 type StartNodeArgs = {
   port: number;
   peerManager: PeerManager;
+  wsClient: { connectToPeer: (ip: string, port?: number) => Promise<void> };
 };
 
-export function startWsNode({ port, peerManager }: StartNodeArgs) {
+export function startWsNode({ port, peerManager, wsClient }: StartNodeArgs) {
   const wss = new WebSocketServer({ port });
 
   wss.on("listening", () => {
@@ -33,12 +39,8 @@ export function startWsNode({ port, peerManager }: StartNodeArgs) {
             return;
           }
 
-          // Save the peer
-          peerManager.upsertPeer(msg.from, {
-            status: "online",
-            lastSeen: Date.now(),
-          });
-
+          // Save the peer & socket mapping
+          peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
           peerManager.setSocket(msg.from.userId, socket as WebSocket);
 
           // Reply HELLO_ACK with my identity
@@ -51,6 +53,7 @@ export function startWsNode({ port, peerManager }: StartNodeArgs) {
           };
 
           socket.send(JSON.stringify(reply));
+          return;
         }
 
         if (msg.type === "PING") {
@@ -66,34 +69,51 @@ export function startWsNode({ port, peerManager }: StartNodeArgs) {
               payload: {},
             })
           );
+          return;
+        }
+
+        if (msg.type === "PONG") {
+          // Incoming PONG means msg.from is alive
+          peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
+          return;
         }
 
         if (msg.type === "PEERS") {
           const profile = getProfile();
           if (!profile) return;
 
-          const list = (msg.payload?.peers ?? []) as any[];
+          const me = profileToIdentity(profile);
 
+          const list = (msg.payload?.peers ?? []) as PeerIdentity[];
+
+          // Merge peers and auto-connect
           for (const p of list) {
             if (!p?.userId || !p?.ip || !p?.name) continue;
-            if (p.userId === profile.userId) continue;
+            if (p.userId === me.userId) continue;
 
+            // Do not force offline; just upsert identity + discoveredVia
             peerManager.upsertPeer(p, {
-              status: "offline",
               lastSeen: Date.now(),
               discoveredVia: msg.from,
             });
+
+            // auto-connect (deduped inside wsClient)
+            wsClient.connectToPeer(p.ip).catch(() => {});
           }
 
+          // Ack
           const ack: WsEnvelope<PeersAckPayload> = {
             type: "PEERS_ACK",
             msgId: randomUUID(),
             ts: Date.now(),
-            from: profileToIdentity(profile),
+            from: me,
             payload: { received: list.length },
           };
-
           socket.send(JSON.stringify(ack));
+
+          // ✅ Forward these peers to everyone else except the sender
+          peerManager.broadcastPeers(list, me, msg.from.userId);
+          return;
         }
       } catch (e) {
         console.log("[WS] invalid message:", e);

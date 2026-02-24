@@ -1,7 +1,8 @@
 import { BrowserWindow } from "electron";
 import { randomUUID } from "crypto";
 import type WebSocket from "ws";
-import type { PeerIdentity } from "./protocol";
+import type { PeerIdentity, WsEnvelope, PeersPayload } from "./protocol";
+import { saveKnownPeers } from "../store/peersStore";
 
 export type PeerStatus = "online" | "offline" | "connecting";
 
@@ -19,6 +20,8 @@ class PeerManager {
 
   upsertPeer(peer: PeerIdentity, patch?: Partial<Peer>) {
     const existing = this.peersByUserId.get(peer.userId);
+
+    // Important: do not overwrite status unless patch provides it
     const next: Peer = {
       ...peer,
       status: existing?.status ?? "offline",
@@ -27,7 +30,12 @@ class PeerManager {
       ...existing,
       ...patch,
     };
+
     this.peersByUserId.set(peer.userId, next);
+
+    // persist identities only
+    saveKnownPeers(this.getAllPeerIdentities());
+
     this.emitPeers();
   }
 
@@ -35,8 +43,22 @@ class PeerManager {
     this.socketsByUserId.set(userId, socket);
   }
 
+  getSocket(userId: string) {
+    return this.socketsByUserId.get(userId);
+  }
+
   removeSocket(userId: string) {
     this.socketsByUserId.delete(userId);
+  }
+
+  removeSocketBySocket(socket: WebSocket) {
+    for (const [uid, s] of this.socketsByUserId.entries()) {
+      if (s === socket) {
+        this.socketsByUserId.delete(uid);
+        return uid;
+      }
+    }
+    return null;
   }
 
   markOnline(userId: string) {
@@ -51,10 +73,24 @@ class PeerManager {
     this.upsertPeer(p, { status: "offline", lastSeen: Date.now() });
   }
 
+  markConnecting(userId: string) {
+    const p = this.peersByUserId.get(userId);
+    if (!p) return;
+    this.upsertPeer(p, { status: "connecting", lastSeen: Date.now() });
+  }
+
   getPeersSnapshot(): Peer[] {
     return Array.from(this.peersByUserId.values()).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
+  }
+
+  getAllPeerIdentities(): PeerIdentity[] {
+    return Array.from(this.peersByUserId.values()).map((p) => ({
+      userId: p.userId,
+      name: p.name,
+      ip: p.ip,
+    }));
   }
 
   emitPeers() {
@@ -63,18 +99,28 @@ class PeerManager {
     win.webContents.send("peers:update", this.getPeersSnapshot());
   }
 
-  newMsgId() {
-    return randomUUID();
-  }
+  // Broadcast a PEERS message to all connected sockets
+  broadcastPeers(peers: PeerIdentity[], envelopeFrom: PeerIdentity, exceptUserId?: string) {
+    const msg: WsEnvelope<PeersPayload> = {
+      type: "PEERS",
+      msgId: randomUUID(),
+      ts: Date.now(),
+      from: envelopeFrom,
+      payload: { peers },
+    };
 
-  removeSocketBySocket(socket: WebSocket) {
-    for (const [uid, s] of this.socketsByUserId.entries()) {
-      if (s === socket) {
-        this.socketsByUserId.delete(uid);
-        return uid;
+    const raw = JSON.stringify(msg);
+
+    for (const [uid, socket] of this.socketsByUserId.entries()) {
+      if (exceptUserId && uid === exceptUserId) continue;
+      if ((socket as any).readyState === 1) {
+        socket.send(raw);
       }
     }
-    return null;
+  }
+
+  newMsgId() {
+    return randomUUID();
   }
 }
 

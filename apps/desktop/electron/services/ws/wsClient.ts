@@ -1,9 +1,14 @@
 import WebSocket from "ws";
 import { getProfile } from "../store/profileStore";
 import type { PeerManager } from "./peerManager";
+import type {
+  WsEnvelope,
+  HelloPayload,
+  PeersPayload,
+  PeerIdentity,
+} from "./protocol";
 import { profileToIdentity } from "./protocol";
 import { randomUUID } from "crypto";
-import type { WsEnvelope, HelloPayload, HelloAckPayload, PeersPayload } from "./protocol";
 
 export function createWsClient(peerManager: PeerManager) {
   const connecting = new Set<string>(); // by ip
@@ -23,6 +28,9 @@ export function createWsClient(peerManager: PeerManager) {
 
     const ws = new WebSocket(url);
 
+    // We only know peer userId after HELLO_ACK
+    let remote: PeerIdentity | null = null;
+
     ws.on("open", () => {
       const hello: WsEnvelope<HelloPayload> = {
         type: "HELLO",
@@ -39,13 +47,17 @@ export function createWsClient(peerManager: PeerManager) {
         const msg = JSON.parse(data.toString()) as WsEnvelope<any>;
 
         if (msg.type === "HELLO_ACK") {
-          peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
-          console.log("[WS-CLIENT] HELLO_ACK from", msg.from.name, msg.from.ip);
+          // msg.from is the peer identity
+          remote = msg.from as PeerIdentity;
 
-          // ✅ send my known peers to them
-          const myKnown = peerManager
-            .getPeersSnapshot()
-            .map((p) => ({ userId: p.userId, name: p.name, ip: p.ip }));
+          // ✅ Map outgoing socket to that peer userId
+          peerManager.setSocket(remote.userId, ws as any);
+
+          peerManager.upsertPeer(remote, { status: "online", lastSeen: Date.now() });
+          console.log("[WS-CLIENT] HELLO_ACK from", remote.name, remote.ip);
+
+          // ✅ send my known peers to them (gossip)
+          const myKnown = peerManager.getAllPeerIdentities();
 
           const peersMsg: WsEnvelope<PeersPayload> = {
             type: "PEERS",
@@ -56,10 +68,47 @@ export function createWsClient(peerManager: PeerManager) {
           };
 
           ws.send(JSON.stringify(peersMsg));
+          return;
         }
 
         if (msg.type === "PONG") {
           peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
+          return;
+        }
+
+        if (msg.type === "PING") {
+          // reply PONG
+          const prof = getProfile();
+          if (!prof) return;
+
+          ws.send(
+            JSON.stringify({
+              type: "PONG",
+              msgId: randomUUID(),
+              ts: Date.now(),
+              from: profileToIdentity(prof),
+              payload: {},
+            })
+          );
+          return;
+        }
+
+        if (msg.type === "PEERS") {
+          // Optional: if a peer sends you peer list directly on outgoing channel
+          const prof = getProfile();
+          if (!prof) return;
+
+          const me = profileToIdentity(prof);
+          const list = (msg.payload?.peers ?? []) as PeerIdentity[];
+
+          for (const p of list) {
+            if (!p?.userId || !p?.ip || !p?.name) continue;
+            if (p.userId === me.userId) continue;
+
+            peerManager.upsertPeer(p, { lastSeen: Date.now(), discoveredVia: msg.from });
+            connectToPeer(p.ip).catch(() => {});
+          }
+          return;
         }
       } catch (e) {
         console.log("[WS-CLIENT] invalid message:", e);
@@ -69,6 +118,11 @@ export function createWsClient(peerManager: PeerManager) {
     ws.on("close", () => {
       console.log("[WS-CLIENT] closed", url);
       connecting.delete(trimmed);
+
+      if (remote?.userId) {
+        peerManager.markOffline(remote.userId);
+        peerManager.removeSocket(remote.userId);
+      }
     });
 
     ws.on("error", (err) => {

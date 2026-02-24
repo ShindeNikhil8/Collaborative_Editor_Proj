@@ -1,6 +1,5 @@
 import type { UserProfile } from "../store/profileStore";
 
-// Keep it simple and strict for now.
 export type PeerIdentity = {
   userId: string;
   name: string;
@@ -23,22 +22,21 @@ export type WsEnvelope<TPayload> = {
   payload: TPayload;
 };
 
-export type PeersPayload = {
-  peers: PeerIdentity[];
-};
-
-export type PeersAckPayload = {
-  received: number;
-};
-
 export type HelloPayload = {
-  // later: projectId, auth token, permissions, etc.
   app: "DistributedEditor";
   version: "0.0.1";
 };
 
 export type HelloAckPayload = {
   accepted: true;
+};
+
+export type PeersPayload = {
+  peers: PeerIdentity[];
+};
+
+export type PeersAckPayload = {
+  received: number;
 };
 
 export function profileToIdentity(p: UserProfile): PeerIdentity {
