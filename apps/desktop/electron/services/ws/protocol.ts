@@ -12,7 +12,9 @@ export type WsType =
   | "PING"
   | "PONG"
   | "PEERS"
-  | "PEERS_ACK";
+  | "PEERS_ACK"
+  | "MSG"
+  | "ACK";
 
 export type WsEnvelope<TPayload> = {
   type: WsType;
@@ -37,6 +39,20 @@ export type PeersPayload = {
 
 export type PeersAckPayload = {
   received: number;
+};
+
+// ✅ Reliable messaging
+export type MsgPayload = {
+  // later: projectId, channelId, permissions etc.
+  kind: "CHAT" | "SYSTEM" | "FILE_EVENT";
+  text: string;
+
+  // optional: file reference
+  fileRef?: { path: string; line: number; col?: number };
+};
+
+export type AckPayload = {
+  ackMsgId: string; // the msgId we are acknowledging
 };
 
 export function profileToIdentity(p: UserProfile): PeerIdentity {

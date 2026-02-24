@@ -8,8 +8,13 @@ const ws_1 = __importDefault(require("ws"));
 const profileStore_1 = require("../store/profileStore");
 const protocol_1 = require("./protocol");
 const crypto_1 = require("crypto");
+const outboxStore_1 = require("../store/outboxStore");
 function createWsClient(peerManager) {
     const connecting = new Set(); // by ip
+    // in-memory cache of pending msgs (loaded from disk on start)
+    const pendingByMsgId = new Map();
+    for (const m of (0, outboxStore_1.loadOutbox)())
+        pendingByMsgId.set(m.msgId, m);
     async function connectToPeer(ip, port = 3002) {
         const trimmed = ip.trim();
         if (!trimmed)
@@ -39,11 +44,10 @@ function createWsClient(peerManager) {
                 const msg = JSON.parse(data.toString());
                 if (msg.type === "HELLO_ACK") {
                     remote = msg.from;
-                    // map outgoing socket
                     peerManager.setSocket(remote.userId, ws);
                     peerManager.upsertPeer(remote, { status: "online", lastSeen: Date.now() });
                     console.log("[WS-CLIENT] HELLO_ACK from", remote.name, remote.ip);
-                    // ✅ Send my known peers INCLUDING myself
+                    // Send my known peers including myself
                     const me = (0, protocol_1.profileToIdentity)(profile);
                     const known = peerManager.getAllPeerIdentities();
                     const peersMsg = {
@@ -54,6 +58,8 @@ function createWsClient(peerManager) {
                         payload: { peers: [me, ...known] },
                     };
                     ws.send(JSON.stringify(peersMsg));
+                    // ✅ When a peer becomes online, flush pending messages to them
+                    flushPendingToUser(remote.userId);
                     return;
                 }
                 if (msg.type === "PING") {
@@ -89,6 +95,17 @@ function createWsClient(peerManager) {
                     }
                     return;
                 }
+                // ✅ Reliable ACK handling
+                if (msg.type === "ACK") {
+                    const payload = msg.payload;
+                    if (payload?.ackMsgId) {
+                        pendingByMsgId.delete(payload.ackMsgId);
+                        (0, outboxStore_1.removeOutbox)(payload.ackMsgId);
+                        // console.log("[RELIABLE] ACK received for", payload.ackMsgId);
+                    }
+                    return;
+                }
+                // Receiving MSG is handled in node.ts (incoming server side)
             }
             catch (e) {
                 console.log("[WS-CLIENT] invalid message:", e);
@@ -107,5 +124,74 @@ function createWsClient(peerManager) {
             connecting.delete(trimmed);
         });
     }
-    return { connectToPeer };
+    // ✅ send reliable msg to a known peer (queues if no socket)
+    async function sendReliable(toUserId, toIp, payload) {
+        const profile = (0, profileStore_1.getProfile)();
+        if (!profile)
+            throw new Error("You must register before sending messages.");
+        const from = (0, protocol_1.profileToIdentity)(profile);
+        const msgId = (0, crypto_1.randomUUID)();
+        const pending = {
+            msgId,
+            ts: Date.now(),
+            toUserId,
+            toIp,
+            from,
+            payload,
+            attempts: 0,
+        };
+        pendingByMsgId.set(msgId, pending);
+        (0, outboxStore_1.upsertOutbox)(pending);
+        // Ensure connection exists
+        connectToPeer(toIp).catch(() => { });
+        // Try send immediately
+        trySendPending(msgId);
+    }
+    function trySendPending(msgId) {
+        const p = pendingByMsgId.get(msgId);
+        if (!p)
+            return;
+        const socket = peerManager.getSocket(p.toUserId);
+        if (!socket || socket.readyState !== 1)
+            return;
+        const env = {
+            type: "MSG",
+            msgId: p.msgId,
+            ts: p.ts,
+            from: p.from,
+            payload: p.payload,
+        };
+        try {
+            socket.send(JSON.stringify(env));
+            const updated = {
+                ...p,
+                attempts: p.attempts + 1,
+                lastAttemptAt: Date.now(),
+            };
+            pendingByMsgId.set(msgId, updated);
+            (0, outboxStore_1.upsertOutbox)(updated);
+        }
+        catch {
+            // ignore, will retry later
+        }
+    }
+    function flushPendingToUser(userId) {
+        for (const m of pendingByMsgId.values()) {
+            if (m.toUserId === userId) {
+                trySendPending(m.msgId);
+            }
+        }
+    }
+    // ✅ Retry loop (every 5 sec): resend pending msgs that aren't ACKed
+    setInterval(() => {
+        const now = Date.now();
+        for (const m of pendingByMsgId.values()) {
+            const last = m.lastAttemptAt ?? 0;
+            // resend if last attempt > 5s ago, and max 20 attempts
+            if (m.attempts < 20 && now - last > 5_000) {
+                trySendPending(m.msgId);
+            }
+        }
+    }, 5_000);
+    return { connectToPeer, sendReliable };
 }

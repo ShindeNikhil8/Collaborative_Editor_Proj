@@ -23,10 +23,8 @@ function startWsNode({ port, peerManager, wsClient }) {
                         return;
                     }
                     const me = (0, protocol_1.profileToIdentity)(profile);
-                    // Save the peer & socket mapping
                     peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
                     peerManager.setSocket(msg.from.userId, socket);
-                    // Reply HELLO_ACK with my identity
                     const reply = {
                         type: "HELLO_ACK",
                         msgId: (0, crypto_1.randomUUID)(),
@@ -35,7 +33,7 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { accepted: true },
                     };
                     socket.send(JSON.stringify(reply));
-                    // ✅ Immediately send my known peers so the new peer learns everyone
+                    // send my known peers immediately
                     const myPeers = peerManager.getAllPeerIdentities();
                     const peersMsg = {
                         type: "PEERS",
@@ -75,10 +73,7 @@ function startWsNode({ port, peerManager, wsClient }) {
                             continue;
                         if (p.userId === me.userId)
                             continue;
-                        peerManager.upsertPeer(p, {
-                            lastSeen: Date.now(),
-                            discoveredVia: msg.from,
-                        });
+                        peerManager.upsertPeer(p, { lastSeen: Date.now(), discoveredVia: msg.from });
                         wsClient.connectToPeer(p.ip).catch(() => { });
                     }
                     const ack = {
@@ -89,8 +84,32 @@ function startWsNode({ port, peerManager, wsClient }) {
                         payload: { received: list.length },
                     };
                     socket.send(JSON.stringify(ack));
-                    // Forward peers to everyone else except sender
                     peerManager.broadcastPeers(list, me, msg.from.userId);
+                    return;
+                }
+                // ✅ Receive reliable MSG and ACK it
+                if (msg.type === "MSG") {
+                    const profile = (0, profileStore_1.getProfile)();
+                    if (!profile)
+                        return;
+                    // update last seen of sender
+                    peerManager.upsertPeer(msg.from, { status: "online", lastSeen: Date.now() });
+                    const payload = msg.payload;
+                    // For now just print; later we emit to renderer (chat UI)
+                    console.log("[MSG] from", msg.from.name, payload);
+                    // Send ACK back
+                    const ack = {
+                        type: "ACK",
+                        msgId: (0, crypto_1.randomUUID)(),
+                        ts: Date.now(),
+                        from: (0, protocol_1.profileToIdentity)(profile),
+                        payload: { ackMsgId: msg.msgId },
+                    };
+                    socket.send(JSON.stringify(ack));
+                    return;
+                }
+                // ACK from incoming socket (rare) — wsClient handles outgoing ACKs
+                if (msg.type === "ACK") {
                     return;
                 }
             }

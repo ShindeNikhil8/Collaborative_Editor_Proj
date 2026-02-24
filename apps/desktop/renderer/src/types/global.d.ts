@@ -33,6 +33,8 @@ declare global {
       getPeers: () => Promise<Peer[]>;
       connectToPeer: (ip: string) => Promise<boolean>;
       onPeersUpdate: (cb: (peers: Peer[]) => void) => () => void;
+
+      sendMsg: (toUserId: string, toIp: string, text: string) => Promise<boolean>;
     };
   }
 }

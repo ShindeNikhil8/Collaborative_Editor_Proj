@@ -16,4 +16,5 @@ electron_1.contextBridge.exposeInMainWorld("api", {
         electron_1.ipcRenderer.on("peers:update", handler);
         return () => electron_1.ipcRenderer.removeListener("peers:update", handler);
     },
+    sendMsg: (toUserId, toIp, text) => electron_1.ipcRenderer.invoke("msg:send", { toUserId, toIp, text }),
 });
