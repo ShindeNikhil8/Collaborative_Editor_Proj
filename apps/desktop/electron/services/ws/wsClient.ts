@@ -45,27 +45,29 @@ export function createWsClient(peerManager: PeerManager) {
         const msg = JSON.parse(data.toString()) as WsEnvelope<any>;
 
         if (msg.type === "HELLO_ACK") {
-          remote = msg.from as PeerIdentity;
-          peerManager.setSocket(remote.userId, ws as any);
-          peerManager.upsertPeer(remote, { status: "online", lastSeen: Date.now() });
+  remote = msg.from as PeerIdentity;
 
-          // send peers
-          const me = profileToIdentity(profile);
-          const known = peerManager.getAllPeerIdentities();
+  connecting.delete(trimmed); // ✅ IMPORTANT
 
-          const peersMsg: WsEnvelope<PeersPayload> = {
-            type: "PEERS",
-            msgId: randomUUID(),
-            ts: Date.now(),
-            from: me,
-            payload: { peers: [me, ...known] },
-          };
-          ws.send(JSON.stringify(peersMsg));
+  peerManager.setSocket(remote.userId, ws as any);
+  peerManager.upsertPeer(remote, { status: "online", lastSeen: Date.now() });
 
-          // flush pending to this peer
-          flushPendingToUser(remote.userId);
-          return;
-        }
+  // ... your existing peers exchange ...
+
+  // migrate pending by IP
+  for (const m of pendingByMsgId.values()) {
+    if (m.toIp === remote.ip && m.toUserId !== remote.userId) {
+      const updated = { ...m, toUserId: remote.userId };
+      pendingByMsgId.set(m.msgId, updated);
+      upsertOutbox(updated);
+    }
+  }
+
+  flushPendingToUser(remote.userId);
+  return;
+}
+
+        
 
         if (msg.type === "PING") {
           const prof = getProfile();

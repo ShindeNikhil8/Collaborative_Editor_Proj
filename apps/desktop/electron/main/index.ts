@@ -129,3 +129,8 @@ ipcMain.handle("chat:public:send", async (_evt, payload: { text: string }) => {
   }
   return groupId;
 });
+
+setInterval(() => {
+  const peers = peerManager.getAllPeerIdentities();
+  for (const p of peers) wsClient.connectToPeer(p.ip).catch(() => {});
+}, 20_000);

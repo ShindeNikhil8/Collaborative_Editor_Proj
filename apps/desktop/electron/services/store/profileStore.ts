@@ -9,32 +9,29 @@ export type UserProfile = {
   createdAt: number;
 };
 
-type Schema = {
-  profile?: UserProfile;
-};
+type Schema = { profile?: UserProfile };
 
-const store = new ElectronStore<Schema>({
-  name: "distributed-editor",
-});
+const store = new ElectronStore<Schema>({ name: "distributed-editor" });
 
 export function getProfile(): UserProfile | null {
   return store.get("profile") ?? null;
 }
 
-export function saveProfile(input: Omit<UserProfile, "userId" | "createdAt">): UserProfile {
-  const existing = store.get("profile");
+export function saveProfile(p: { name: string; email: string; ip: string }): UserProfile {
+  const existing = getProfile();
 
-  const profile: UserProfile = {
-    userId: existing?.userId ?? randomUUID(),
-    createdAt: existing?.createdAt ?? Date.now(),
-    ...input,
+  const next: UserProfile = {
+    userId: existing?.userId ?? randomUUID(),     // ✅ stable forever
+    createdAt: existing?.createdAt ?? Date.now(), // ✅ stable forever
+    name: p.name,
+    email: p.email,
+    ip: p.ip,
   };
 
-  store.set("profile", profile);
-  return profile;
+  store.set("profile", next);
+  return next;
 }
 
-export function clearProfile(): void {
-  // electron-store supports delete(key)
+export function clearProfile() {
   store.delete("profile");
 }
